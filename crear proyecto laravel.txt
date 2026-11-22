@@ -1,0 +1,340 @@
+-crear 
+composer config -g policy.advisories.block false
+composer create-project laravel/laravel:^10.0 colegio-backend
+
+-desactivar el bloqueo de avisos de seguridad en Composer
+
+crear vendor
+composer update
+
+php artisan key:generate
+php artisan serve
+
+crear modelos controlaodres y migraciones
+
+php artisan make:model Module -mc --api
+
+
+poner rutas en routes/api
+
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\ModuleController;
+
+Route::prefix('/')->group(function () {
+
+    Route::apiResource('modules', ModuleController::class);
+   
+    });
+
+MODELOS
+hasMany = "Uno a muchos"
+belongsTo = "Pertenece a" (lado hijo de una relación uno a muchos
+hasOne = "Uno a uno"
+belongsToMany ("muchos a muchos")
+
+UTILIZAR Cloudinary
+
+esto va en la terminal
+composer require cloudinary-labs/cloudinary-laravel
+
+si no existe cloudinary database php
+
+php artisan vendor:publish --provider="CloudinaryLabs\CloudinaryLaravel\CloudinaryServiceProvider" --tag="cloudinary-laravel-config"
+
+.env del BACKEND
+CLOUDINARY_URL=cloudinary://439917334833281:zgRpn3pA2l4oiqt8i99jtu76aLs@gpm3s5bi
+
+Importar Cloudinary en el controlador (EstudentController)
+use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
+
+crear controladores 
+
+Subir el archivo y sacar el link
+Cuando llega un archivo en la petición ($request->file('expediente')), lo mandas a Cloudinary con Cloudinary::upload(...) y sacas el link seguro con getSecurePath():
+
+PHP
+// 1. Verifica que venga el archivo en el campo 'expediente'
+if ($request->hasFile('expediente')) {
+    // 2. Sube el archivo a Cloudinary dentro de la carpeta 'colegio/expedientes'
+    $subido = Cloudinary::upload(
+        $request->file('expediente')->getRealPath(),
+        [
+            'folder'        => 'colegio/expedientes',
+            'resource_type' => 'auto', // Sirve para imágenes y PDFs
+        ]
+    );
+
+    // 3. Obtiene el enlace (URL) que devolvió Cloudinary para guardarlo en MySQL
+    $urlExpediente = $subido->getSecurePath();
+}
+
+
+
+coontrolador estudent 
+
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Estudent;
+use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary; // Herramienta para subir a Cloudinary
+use Illuminate\Http\Request;
+
+class EstudentController extends Controller
+{
+    // GET /api/estudents -> Lista todos los estudiantes con su módulo
+    public function index()
+    {
+        $estudents = Estudent::with('module')->get();
+        return response()->json($estudents, 200);
+    }
+
+    // POST /api/estudents -> Crea un estudiante y sube su 'expediente' a Cloudinary
+    public function store(Request $request)
+    {
+        // Valida los datos y exige un archivo en 'expediente' (hasta 10 MB)
+        $validated = $request->validate([
+            'module_id'        => 'required|exists:modules,id',
+            'nombre'           => 'required|string|max:255',
+            'apellidos'        => 'required|string|max:255',
+            'fecha_nacimiento' => 'required|date',
+            'expediente'       => 'required|file|mimes:pdf,jpg,jpeg,png|max:10240',
+        ]);
+
+        // Sube el archivo recibido a Cloudinary en la carpeta 'colegio/expedientes'
+        $uploadedFile = Cloudinary::upload(
+            $request->file('expediente')->getRealPath(),
+            [
+                'folder'        => 'colegio/expedientes',
+                'resource_type' => 'auto',
+            ]
+        );
+
+        // Guarda el estudiante en MySQL guardando la URL segura de Cloudinary en 'expediente'
+        $estudent = Estudent::create([
+            'module_id'        => $validated['module_id'],
+            'nombre'           => $validated['nombre'],
+            'apellidos'        => $validated['apellidos'],
+            'fecha_nacimiento' => $validated['fecha_nacimiento'],
+            'expediente'       => $uploadedFile->getSecurePath(),
+        ]);
+
+        return response()->json($estudent->load('module'), 201);
+    }
+
+    // GET /api/estudents/{estudent} -> Muestra un estudiante y su módulo
+    public function show(Estudent $estudent)
+    {
+        return response()->json($estudent->load('module'), 200);
+    }
+
+    // PUT/PATCH /api/estudents/{estudent} -> Actualiza estudiante (y sube nuevo expediente si llega)
+    public function update(Request $request, Estudent $estudent)
+    {
+        $validated = $request->validate([
+            'module_id'        => 'sometimes|exists:modules,id',
+            'nombre'           => 'sometimes|string|max:255',
+            'apellidos'        => 'sometimes|string|max:255',
+            'fecha_nacimiento' => 'sometimes|date',
+            'expediente'       => 'sometimes|file|mimes:pdf,jpg,jpeg,png|max:10240',
+        ]);
+
+        // Toma solo los campos de texto/ID que llegaron
+        $dataToUpdate = $request->only([
+            'module_id',
+            'nombre',
+            'apellidos',
+            'fecha_nacimiento',
+        ]);
+
+        // Si en esta actualización enviaron un archivo nuevo en 'expediente', lo sube a Cloudinary
+        if ($request->hasFile('expediente')) {
+            $uploadedFile = Cloudinary::upload(
+                $request->file('expediente')->getRealPath(),
+                [
+                    'folder'        => 'colegio/expedientes',
+                    'resource_type' => 'auto',
+                ]
+            );
+
+            // Reemplaza 'expediente' por el nuevo link de Cloudinary
+            $dataToUpdate['expediente'] = $uploadedFile->getSecurePath();
+        }
+
+        $estudent->update($dataToUpdate);
+
+        return response()->json($estudent->load('module'), 200);
+    }
+
+    // DELETE /api/estudents/{estudent} -> Elimina un estudiante
+    public function destroy(Estudent $estudent)
+    {
+        $estudent->delete();
+        return response()->json(['message' => 'Estudiante eliminado correctamente'], 200);
+    }
+}
+
+4 tablas
+modules: id, codigo (único), nombre.
+
+Tiene muchos estudents y muchos tachers (por module_teachers).
+
+tachers: id, nombre, apellido, telefono, cedula (único).
+
+Tiene muchos modules (por module_teachers).
+
+estudents: id, module_id (FK → modules), nombre, apellidos, fecha_nacimiento, expediente.
+
+Pertenece a un module.
+
+expediente guarda el link de Cloudinary, no el archivo.
+
+module_teachers (pivote): id, module_id (FK → modules), teacher_id (FK → tachers).
+
+Une modules y tachers (muchos a muchos).
+
+Ojo con esto
+Migrar en orden: primero modules y tachers; luego estudents y module_teachers.
+
+Cloudinary va en el backend (EstudentController), no en el cliente.
+
+Respetar nombres del MER: Estudent, Tacher, ModuleTeacher y teacher_id.
+
+php artisan migrate:fresh
+
+
+PROBAR LAS RUTAS
+php artisan serve
+http://127.0.0.1:8000/api/estudents
+
+
+
+PASAR A CREAR EL CLIENTE
+
+composer config -g policy.advisories.block false
+composer create-project laravel/laravel:^10.0 colegio-frontend
+
+
+Configurar el archivo hosts en Windows
+
+C:\Windows\System32\drivers\etc\hosts
+
+127.0.0.1   colegio-backend.test
+127.0.0.1   colegio-frontend.test
+
+Activar VirtualHosts en Apache (XAMPP)
+
+C:\xampp\apache\conf\httpd.conf
+
+Include conf/extra/httpd-vhosts.conf
+
+Configurar los VirtualHost
+
+C:\xampp\apache\conf\extra\httpd-vhosts.conf
+
+<VirtualHost *:80>
+    ServerName colegio-backend.test
+    DocumentRoot "C:/xampp/htdocs/laravel/colegio-backend/public"
+
+    <Directory "C:/xampp/htdocs/laravel/colegio-backend/public">
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>
+
+<VirtualHost *:80>
+    ServerName colegio-frontend.test
+    DocumentRoot "C:/xampp/htdocs/laravel/colegio-frontend/public"
+
+    <Directory "C:/xampp/htdocs/laravel/colegio-frontend/public">
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>
+
+.env de tu proyecto cliente (colegio-frontend
+
+API_BASE_URL=http://colegio-backend.test/api
+
+.env backend 
+APP_URL=http://colegio-backend.test
+
+php artisan config:clear
+php artisan migrate:fresh
+
+probar get 
+http://colegio-backend.test/api/modules
+
+el .env de colegio-frontend
+
+APP_URL=http://colegio-frontend.test
+API_BASE_URL=http://colegio-backend.test/api
+
+Agrega en config/services.php de colegio-frontend
+
+'api' => [
+    'base_url' => env('API_BASE_URL', 'http://colegio-backend.test/api'),
+],
+
+
+
+Rutas web en colegio-frontend
+
+
+<?php
+
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\ModuleClientController;
+
+// Redirige la raíz '/' directo a '/modules'
+Route::get('/', function () {
+    return redirect()->route('modules.index');
+});
+
+<?php
+
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\ModuleClientController;
+use App\Http\Controllers\TacherClientController;
+use App\Http\Controllers\EstudentClientController;
+use App\Http\Controllers\ModuleTeacherClientController;
+
+Route::get('/', function () {
+    return redirect()->route('modules.index');
+});
+
+// Módulos
+Route::get('/modules', [ModuleClientController::class, 'index'])->name('modules.index');
+Route::post('/modules', [ModuleClientController::class, 'store'])->name('modules.store');
+Route::put('/modules/{id}', [ModuleClientController::class, 'update'])->name('modules.update');
+Route::delete('/modules/{id}', [ModuleClientController::class, 'destroy'])->name('modules.destroy');
+
+// Docentes
+Route::get('/tachers', [TacherClientController::class, 'index'])->name('tachers.index');
+Route::post('/tachers', [TacherClientController::class, 'store'])->name('tachers.store');
+Route::put('/tachers/{id}', [TacherClientController::class, 'update'])->name('tachers.update');
+Route::delete('/tachers/{id}', [TacherClientController::class, 'destroy'])->name('tachers.destroy');
+
+// Estudiantes
+Route::get('/estudents', [EstudentClientController::class, 'index'])->name('estudents.index');
+Route::post('/estudents', [EstudentClientController::class, 'store'])->name('estudents.store');
+Route::put('/estudents/{id}', [EstudentClientController::class, 'update'])->name('estudents.update');
+Route::delete('/estudents/{id}', [EstudentClientController::class, 'destroy'])->name('estudents.destroy');
+
+// Asignación Módulo - Docente
+Route::get('/module-teachers', [ModuleTeacherClientController::class, 'index'])->name('module-teachers.index');
+Route::post('/module-teachers', [ModuleTeacherClientController::class, 'store'])->name('module-teachers.store');
+Route::delete('/module-teachers/{id}', [ModuleTeacherClientController::class, 'destroy'])->name('module-teachers.destroy');
+
+crear controladores
+
+php artisan make:controller ModuleClientController
+
+crear vistasa
+Vista de Docentes: resources/views/tachers/index.blade.php
+
+limpiar cache 
+php artisan optimize:clear
+
+
+
